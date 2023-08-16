@@ -245,12 +245,14 @@ func (d *Daemon) sharedFusedevMount(rafs *rafs.Rafs) error {
 		return errors.Wrapf(err, "mount instance %s", rafs.SnapshotID)
 	}
 
+	configPath := d.ConfigFile(rafs.SnapshotID)
+	enableDeduplication := config.GetEnableChunkDeduplication()
 	bootstrap, err := rafs.BootstrapFile()
 	if err != nil {
 		return err
 	}
 
-	c, err := daemonconfig.NewDaemonConfig(d.States.FsDriver, d.ConfigFile(rafs.SnapshotID))
+	c, err := daemonconfig.NewDaemonConfig(d.States.FsDriver, d.ConfigFile(rafs.SnapshotID), enableDeduplication)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to reload instance configuration %s",
 			d.ConfigFile(rafs.SnapshotID))
@@ -259,6 +261,15 @@ func (d *Daemon) sharedFusedevMount(rafs *rafs.Rafs) error {
 	cfg, err := c.DumpString()
 	if err != nil {
 		return errors.Wrap(err, "dump instance configuration")
+	}
+
+	// exec static deduplication for bootstrap
+	if enableDeduplication {
+		log.L.Debugln("Enable chunk decuplication, sharedFusedevMount, cfg = ", cfg)
+		bootstrap, err = rafs.DeduplicateBootstrap(bootstrap, configPath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to dedup rafs bootstrap")
+		}
 	}
 
 	err = client.Mount(rafs.RelaMountpoint(), bootstrap, cfg)
@@ -280,7 +291,9 @@ func (d *Daemon) sharedErofsMount(ra *rafs.Rafs) error {
 		return errors.Wrapf(err, "failed to create fscache work dir %s", ra.FscacheWorkDir())
 	}
 
-	c, err := daemonconfig.NewDaemonConfig(d.States.FsDriver, d.ConfigFile(ra.SnapshotID))
+	configPath := d.ConfigFile(ra.SnapshotID)
+	enableDeduplication := config.GetEnableChunkDeduplication()
+	c, err := daemonconfig.NewDaemonConfig(d.States.FsDriver, configPath, enableDeduplication)
 	if err != nil {
 		log.L.Errorf("Failed to reload daemon configuration %s, %s", d.ConfigFile(ra.SnapshotID), err)
 		return err
@@ -307,6 +320,15 @@ func (d *Daemon) sharedErofsMount(ra *rafs.Rafs) error {
 	ra.AddAnnotation(rafs.AnnoFsCacheID, fscacheID)
 
 	if err := erofs.Mount(cfg.DomainID, fscacheID, mountPoint); err != nil {
+	if enableDeduplication {
+		log.L.Debugln("Enable chunk deduplication, sharedErofsMount, cfg = ", cfg)
+		bootstrapPath, err = ra.DeduplicateBootstrap(bootstrapPath, configPath)
+		if err != nil {
+			return errors.Wrapf(err, "dedup rafs bootstrap")
+		}
+	}
+
+	if err := erofs.Mount(bootstrapPath, cfg.DomainID, fscacheID, mountPoint); err != nil {
 		if !errdefs.IsErofsMounted(err) {
 			return errors.Wrapf(err, "mount erofs to %s", mountPoint)
 		}

@@ -97,7 +97,7 @@ func NewSnapshotter(ctx context.Context, cfg *config.SnapshotterConfig) (snapsho
 	var daemonConfig *daemonconfig.DaemonConfig
 	fsDriver := config.GetFsDriver()
 	if fsDriver == config.FsDriverFscache || fsDriver == config.FsDriverFusedev {
-		config, err := daemonconfig.NewDaemonConfig(config.GetFsDriver(), cfg.DaemonConfig.NydusdConfigPath)
+		config, err := daemonconfig.NewDaemonConfig(config.GetFsDriver(), cfg.DaemonConfig.NydusdConfigPath, cfg.DaemonConfig.EnableChunkDeduplication)
 		if err != nil {
 			return nil, errors.Wrap(err, "load daemon configuration")
 		}

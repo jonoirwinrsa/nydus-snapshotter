@@ -41,6 +41,20 @@ func (m *Manager) StartDaemon(d *daemon.Daemon) error {
 		return errors.Wrapf(err, "create command for daemon %s", d.ID())
 	}
 
+	// not deduplicate bootstrap for shared daemon mode
+	if config.GetEnableChunkDeduplication() && !d.IsSharedDaemon() {
+		rafs := d.RafsCache.Head()
+		if rafs == nil {
+			return errors.Wrapf(errdefs.ErrNotFound, "daemon %s no rafs instance associated", d.ID())
+		}
+		configPath := d.ConfigFile("")
+		bootstrap, _ := rafs.BootstrapFile()
+		_, err = rafs.DeduplicateBootstrap(bootstrap, configPath)
+		if err != nil {
+			return errors.Errorf("fail to deduplicate bootstrap")
+		}
+	}
+
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -125,7 +139,7 @@ func (m *Manager) BuildDaemonCommand(d *daemon.Daemon, bin string, upgrade bool)
 	var imageReference string
 
 	nydusdThreadNum := d.NydusdThreadNum()
-
+	enableDeduplication := config.GetEnableChunkDeduplication()
 	if d.States.FsDriver == config.FsDriverFscache {
 		cmdOpts = append(cmdOpts,
 			command.WithMode("singleton"),
@@ -153,6 +167,10 @@ func (m *Manager) BuildDaemonCommand(d *daemon.Daemon, bin string, upgrade bool)
 			bootstrap, err := rafs.BootstrapFile()
 			if err != nil {
 				return nil, errors.Wrapf(err, "locate bootstrap %s", bootstrap)
+			}
+
+			if enableDeduplication {
+				bootstrap += ".dedup"
 			}
 
 			cmdOpts = append(cmdOpts,
